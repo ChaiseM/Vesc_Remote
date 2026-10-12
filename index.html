@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Joystick VESC</title>
+<style>
+:root{--bg:#eceae4;--fg:#1c1e20;--mut:#62666a;--card:#fbfaf7;--line:#cfcdc6;--acc:#d9480f;--brk:#1c7ed6;--ok:#2b8a3e;--bad:#c92a2a;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15171a;--fg:#ecebe6;--mut:#9a9ea3;--card:#1f2226;--line:#34383d;--acc:#ff8a4c;--brk:#5aa9f5;--ok:#51cf66;--bad:#ff6b6b}}
+:root[data-theme="dark"]{--bg:#15171a;--fg:#ecebe6;--mut:#9a9ea3;--card:#1f2226;--line:#34383d;--acc:#ff8a4c;--brk:#5aa9f5;--ok:#51cf66;--bad:#ff6b6b}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:16px/1.4 "Barlow","Segoe UI",system-ui,sans-serif;display:flex;flex-direction:column;gap:10px;padding:10px;touch-action:manipulation}
+header{display:flex;align-items:center;gap:10px;justify-content:space-between}
+#st{font-size:14px;color:var(--mut)}
+#st.on{color:var(--ok)}
+button{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:10px;padding:10px 14px}
+button:focus-visible,input:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+#arm.on{background:var(--bad);border-color:var(--bad);color:#fff}
+main{flex:1;min-height:0;display:flex;flex-direction:row-reverse;gap:10px}
+#col{flex:0 0 46%;max-width:210px;min-width:0;display:flex;flex-direction:column;justify-content:flex-end;gap:10px}
+#arm{padding:22px;font-size:22px}
+#track{flex:0 0 auto;height:min(46vh,300px);position:relative;border-radius:18px;border:1px solid var(--line);background:linear-gradient(var(--card),var(--card));overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+#track::before{content:"";position:absolute;inset:0 0 50% 0;background:color-mix(in srgb,var(--acc) 14%,transparent)}
+#track::after{content:"";position:absolute;inset:50% 0 0 0;background:color-mix(in srgb,var(--brk) 14%,transparent)}
+.lbl{position:absolute;left:0;right:0;text-align:center;font-weight:700;color:var(--mut);z-index:1;pointer-events:none}
+#up{top:14px}#dn{bottom:14px}
+#mid{position:absolute;left:0;right:0;top:50%;border-top:2px dashed var(--line);z-index:1}
+#thumb{position:absolute;left:50%;width:72px;height:72px;margin:-36px 0 0 -36px;border-radius:50%;background:var(--fg);z-index:2;pointer-events:none;top:50%;display:grid;place-items:center;color:var(--bg);font-weight:700;font-size:15px}
+#thumb.go{background:var(--acc)}#thumb.br{background:var(--brk)}
+aside{flex:1;min-width:0;display:flex;flex-direction:column;gap:10px;overflow:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px}
+.card label{display:block;font-size:13px;color:var(--mut)}
+.card input[type=range]{width:100%}
+.card input[type=number]{width:100%;font:inherit;padding:6px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+#amp{font-size:28px;font-weight:700}
+#log{font-size:12px;color:var(--mut);white-space:pre-wrap;word-break:break-word;min-height:3.6em}
+</style>
+</head>
+<body>
+<header>
+  <button id="conn">Connecter</button>
+  <span id="st">Non connecté</span>
+</header>
+<main>
+  <div id="col">
+  <div id="track" role="slider" aria-label="Accélération et freinage">
+    <div class="lbl" id="up">Accélérer</div>
+    <div id="mid"></div>
+    <div class="lbl" id="dn">Freiner</div>
+    <div id="thumb">0</div>
+  </div>
+  <button id="arm" aria-pressed="false">Armer</button>
+  </div>
+  <aside>
+    <div class="card"><label>Courant envoyé</label><div id="amp">0.0 A</div></div>
+    <div class="card"><label>Courant max accélération : <b id="vA">6</b> A</label><input id="mA" type="range" min="0" max="85" step="1" value="6"></div>
+    <div class="card"><label>Courant max freinage : <b id="vB">6</b> A</label><input id="mB" type="range" min="0" max="85" step="1" value="6"></div>
+    <div class="card"><label>Rampe d'accélération : <b id="vR">8</b> A/s</label><input id="mR" type="range" min="2" max="100" step="1" value="8"></div>
+    <div class="card"><label>ID CAN du 2e VESC (vide si un seul)</label><input id="can" type="number" min="0" max="253" inputmode="numeric"></div>
+    <div class="card"><label><input id="all" type="checkbox"> Afficher tous les appareils Bluetooth</label></div>
+    <div id="log"></div>
+  </aside>
+</main>
+<script>
+const NUS="6e400001-b5a3-f393-e0a9-e50e24dcca9e", RXC="6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+const $=id=>document.getElementById(id);
+let dev=null,chr=null,timer=null,armed=false,touching=false,pos=0,cur=0,last=performance.now(),ticking=false,wake=null;
+const logs=[];
+function log(m){logs.push(m);if(logs.length>4)logs.shift();$("log").textContent=logs.join("\n")}
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+[["mA","vA"],["mB","vB"],["mR","vR"]].forEach(([i,o])=>$(i).oninput=()=>$(o).textContent=$(i).value);
+
+function crc16(d){let c=0;for(const x of d){c^=x<<8;for(let i=0;i<8;i++)c=(c&0x8000)?((c<<1)^0x1021)&0xffff:(c<<1)&0xffff}return c}
+function frame(p){const n=p.length,b=new Uint8Array(n+5);b[0]=2;b[1]=n;b.set(p,2);const c=crc16(p);b[n+2]=c>>8;b[n+3]=c&255;b[n+4]=3;return b}
+function cmd(id,amps){const p=new Uint8Array(5);p[0]=id;new DataView(p.buffer).setInt32(1,Math.round(amps*1000));return p}
+function canWrap(id,p){const q=new Uint8Array(p.length+2);q[0]=34;q[1]=id;q.set(p,2);return q}
+async function send(f){if(!chr)return;if(chr.writeValueWithoutResponse)await chr.writeValueWithoutResponse(f);else await chr.writeValue(f)}
+
+async function tick(){
+  if(ticking||!chr)return;ticking=true;
+  const now=performance.now(),dt=Math.min((now-last)/1000,0.2);last=now;
+  let target=0;
+  if(armed&&touching){target=pos>=0?pos*$("mA").value:pos*$("mB").value}
+  if(target>cur){if(cur<0)cur=0;cur=Math.min(target,cur+$("mR").value*dt)}else cur=target;
+  const p=Math.abs(cur)<0.05?cmd(6,0):(cur>0?cmd(6,cur):cmd(7,-cur));
+  try{
+    await send(frame(p));
+    const c=$("can").value;if(c!=="")await send(frame(canWrap(+c,p)));
+  }catch(e){log("Erreur d'envoi : "+e.message)}
+  ticking=false;ui();
+}
+function ui(){
+  const t=$("thumb");t.style.top=((1-pos)/2*100)+"%";
+  t.className=(touching&&armed&&pos>0.04)?"go":(touching&&armed&&pos<-0.04)?"br":"";
+  t.textContent=Math.round(pos*100);
+  $("amp").textContent=cur.toFixed(1)+" A";
+}
+function release(){touching=false;pos=0;ui()}
+const tr=$("track");
+function move(e){const r=tr.getBoundingClientRect();let v=clamp((1-2*(e.clientY-r.top)/r.height)*1.1,-1,1);pos=Math.abs(v)<0.04?0:v;ui()}
+tr.onpointerdown=e=>{tr.setPointerCapture(e.pointerId);touching=true;move(e)};
+tr.onpointermove=e=>{if(touching)move(e)};
+["pointerup","pointercancel","lostpointercapture"].forEach(n=>tr.addEventListener(n,release));
+
+function setArmed(v){armed=v&&!!chr;$("arm").classList.toggle("on",armed);$("arm").setAttribute("aria-pressed",armed);$("arm").textContent=armed?"Désarmer":"Armer";if(!armed){cur=0;release()}}
+$("arm").onclick=()=>setArmed(!armed);
+document.addEventListener("visibilitychange",()=>{if(document.hidden)setArmed(false)});
+
+function stopLoop(){clearInterval(timer);timer=null;chr=null;setArmed(false);$("st").textContent="Non connecté";$("st").className="";$("conn").textContent="Connecter"}
+$("conn").onclick=async()=>{
+  if(dev&&dev.gatt.connected){dev.gatt.disconnect();return}
+  if(!navigator.bluetooth){log("Web Bluetooth indisponible : utilise Chrome sur Android, en HTTPS.");return}
+  try{
+    const opt=$("all").checked?{acceptAllDevices:true,optionalServices:[NUS]}:{filters:[{namePrefix:"VESC"}],optionalServices:[NUS]};
+    dev=await navigator.bluetooth.requestDevice(opt);
+    dev.addEventListener("gattserverdisconnected",()=>{log("Déconnecté");stopLoop()});
+    $("st").textContent="Connexion…";
+    const srv=await dev.gatt.connect();
+    const svc=await srv.getPrimaryService(NUS);
+    chr=await svc.getCharacteristic(RXC);
+    $("st").textContent="Connecté : "+(dev.name||"VESC");$("st").className="on";$("conn").textContent="Déconnecter";
+    log("Prêt. Appuie sur Armer, puis garde le doigt sur le joystick.");
+    last=performance.now();timer=setInterval(tick,50);
+    try{wake=await navigator.wakeLock.request("screen")}catch(e){}
+  }catch(e){log("Échec : "+e.message);stopLoop()}
+};
+window.addEventListener("beforeunload",()=>{try{dev&&dev.gatt.disconnect()}catch(e){}});
+</script>
+</body>
+</html>
