@@ -34,6 +34,7 @@ aside{flex:1;min-width:0;display:flex;flex-direction:column;gap:10px;overflow:au
 .card label{display:block;font-size:13px;color:var(--mut)}
 .card input[type=range]{width:100%}
 .card input[type=number]{width:100%;font:inherit;padding:6px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+.big{font-size:30px;font-weight:700;line-height:1.1}.big small{font-size:14px;font-weight:400;color:var(--mut)}
 #amp{font-size:28px;font-weight:700}
 #log{font-size:12px;color:var(--mut);white-space:pre-wrap;word-break:break-word;min-height:3.6em}
 </style>
@@ -54,19 +55,21 @@ aside{flex:1;min-width:0;display:flex;flex-direction:column;gap:10px;overflow:au
   <button id="arm" aria-pressed="false">Armer</button>
   </div>
   <aside>
+    <div class="card"><label>Vitesse</label><div class="big"><span id="spd">--</span> <small>km/h</small></div><label>Puissance</label><div class="big"><span id="pwr">--</span> <small>W</small></div><label>Batterie : <b id="vin">--</b> V</label></div>
     <div class="card"><label>Courant envoyé</label><div id="amp">0.0 A</div></div>
     <div class="card"><label>Courant max accélération : <b id="vA">6</b> A</label><input id="mA" type="range" min="0" max="85" step="1" value="6"></div>
     <div class="card"><label>Courant max freinage : <b id="vB">6</b> A</label><input id="mB" type="range" min="0" max="85" step="1" value="6"></div>
     <div class="card"><label>Rampe d'accélération : <b id="vR">8</b> A/s</label><input id="mR" type="range" min="2" max="100" step="1" value="8"></div>
     <div class="card"><label>ID CAN du 2e VESC (vide si un seul)</label><input id="can" type="number" min="0" max="253" inputmode="numeric"></div>
+    <div class="card"><label><b>Calcul de la vitesse (à régler)</b></label><label>Paires de pôles du moteur</label><input id="pp" type="number" min="1" value="7"><label>Réduction (1 = direct)</label><input id="gr" type="number" step="0.01" min="0.1" value="1"><label>Diamètre de roue (mm)</label><input id="wd" type="number" min="1" value="90"></div>
     <div class="card"><label><input id="all" type="checkbox"> Afficher tous les appareils Bluetooth</label></div>
     <div id="log"></div>
   </aside>
 </main>
 <script>
-const NUS="6e400001-b5a3-f393-e0a9-e50e24dcca9e", RXC="6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+const NUS="6e400001-b5a3-f393-e0a9-e50e24dcca9e", RXC="6e400002-b5a3-f393-e0a9-e50e24dcca9e", TXC="6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 const $=id=>document.getElementById(id);
-let dev=null,chr=null,timer=null,armed=false,touching=false,pos=0,cur=0,last=performance.now(),ticking=false,wake=null;
+let nt=0,rx=[],dev=null,chr=null,timer=null,armed=false,touching=false,pos=0,cur=0,last=performance.now(),ticking=false,wake=null;
 const logs=[];
 function log(m){logs.push(m);if(logs.length>4)logs.shift();$("log").textContent=logs.join("\n")}
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
@@ -78,6 +81,33 @@ function cmd(id,amps){const p=new Uint8Array(5);p[0]=id;new DataView(p.buffer).s
 function canWrap(id,p){const q=new Uint8Array(p.length+2);q[0]=34;q[1]=id;q.set(p,2);return q}
 async function send(f){if(!chr)return;if(chr.writeValueWithoutResponse)await chr.writeValueWithoutResponse(f);else await chr.writeValue(f)}
 
+function onData(ev){
+  const dv=ev.target.value;
+  for(const b of new Uint8Array(dv.buffer,dv.byteOffset,dv.byteLength))rx.push(b);
+  if(rx.length>600)rx=[];
+  for(;;){
+    while(rx.length&&rx[0]!==2&&rx[0]!==3)rx.shift();
+    if(!rx.length)return;
+    const hl=rx[0]===2?2:3;
+    if(rx.length<hl)return;
+    const len=rx[0]===2?rx[1]:(rx[1]<<8)|rx[2];
+    const tot=hl+len+3;
+    if(rx.length<tot)return;
+    const pl=Uint8Array.from(rx.slice(hl,hl+len));
+    const ok=rx[tot-1]===3&&((rx[hl+len]<<8)|rx[hl+len+1])===crc16(pl);
+    rx.splice(0,ok?tot:1);
+    if(ok&&pl[0]===4)values(pl);
+  }
+}
+function values(pl){
+  if(pl.length<29)return;
+  const d=new DataView(pl.buffer,pl.byteOffset+1);
+  const cin=d.getInt32(8)/100,rpm=d.getInt32(22),vin=d.getInt16(26)/10;
+  const kmh=Math.abs(rpm)/(+$("pp").value||1)/(+$("gr").value||1)*Math.PI*(+$("wd").value||0)*60/1e6;
+  $("spd").textContent=kmh.toFixed(1);
+  $("pwr").textContent=Math.round(vin*cin);
+  $("vin").textContent=vin.toFixed(1);
+}
 async function tick(){
   if(ticking||!chr)return;ticking=true;
   const now=performance.now(),dt=Math.min((now-last)/1000,0.2);last=now;
@@ -87,6 +117,7 @@ async function tick(){
   const p=Math.abs(cur)<0.05?cmd(6,0):(cur>0?cmd(6,cur):cmd(7,-cur));
   try{
     await send(frame(p));
+    if(++nt%4===0)await send(frame(Uint8Array.of(4)));
     const c=$("can").value;if(c!=="")await send(frame(canWrap(+c,p)));
   }catch(e){log("Erreur d'envoi : "+e.message)}
   ticking=false;ui();
@@ -108,7 +139,7 @@ function setArmed(v){armed=v&&!!chr;$("arm").classList.toggle("on",armed);$("arm
 $("arm").onclick=()=>setArmed(!armed);
 document.addEventListener("visibilitychange",()=>{if(document.hidden)setArmed(false)});
 
-function stopLoop(){clearInterval(timer);timer=null;chr=null;setArmed(false);$("st").textContent="Non connecté";$("st").className="";$("conn").textContent="Connecter"}
+function stopLoop(){clearInterval(timer);timer=null;chr=null;rx=[];$("spd").textContent=$("pwr").textContent=$("vin").textContent="--";setArmed(false);$("st").textContent="Non connecté";$("st").className="";$("conn").textContent="Connecter"}
 $("conn").onclick=async()=>{
   if(dev&&dev.gatt.connected){dev.gatt.disconnect();return}
   if(!navigator.bluetooth){log("Web Bluetooth indisponible : utilise Chrome sur Android, en HTTPS.");return}
@@ -120,12 +151,14 @@ $("conn").onclick=async()=>{
     const srv=await dev.gatt.connect();
     const svc=await srv.getPrimaryService(NUS);
     chr=await svc.getCharacteristic(RXC);
+    try{const tx=await svc.getCharacteristic(TXC);await tx.startNotifications();tx.addEventListener("characteristicvaluechanged",onData)}catch(e){log("Télémétrie indisponible : "+e.message)}
     $("st").textContent="Connecté : "+(dev.name||"VESC");$("st").className="on";$("conn").textContent="Déconnecter";
     log("Prêt. Appuie sur Armer, puis garde le doigt sur le joystick.");
     last=performance.now();timer=setInterval(tick,50);
     try{wake=await navigator.wakeLock.request("screen")}catch(e){}
   }catch(e){log("Échec : "+e.message);stopLoop()}
 };
+try{["pp","gr","wd","can"].forEach(i=>{const v=localStorage.getItem("vj_"+i);if(v!==null)$(i).value=v;$(i).addEventListener("change",()=>{try{localStorage.setItem("vj_"+i,$(i).value)}catch(e){}})})}catch(e){}
 window.addEventListener("beforeunload",()=>{try{dev&&dev.gatt.disconnect()}catch(e){}});
 </script>
 </body>
