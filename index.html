@@ -41,6 +41,11 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--acc);outline-of
 #thumb.go{background:var(--acc)}#thumb.br{background:var(--brk)}
 #arm{padding:20px;font-size:20px}
 #arm.on{background:var(--bad);border-color:var(--bad);color:#fff}
+#tabs{display:flex;gap:8px}#tabs button{flex:1;padding:8px}#tabs .act{border-color:var(--acc);color:var(--acc)}
+.hide{display:none!important}
+#pv{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px}
+#inf{flex:1;overflow:auto;display:flex;flex-direction:column;gap:8px}
+.row{display:flex;justify-content:space-between;gap:10px;padding:7px 2px;border-bottom:1px solid var(--line);font-size:15px}.row span{color:var(--mut)}.row b{font-variant-numeric:tabular-nums;text-align:right}
 #set{position:fixed;inset:0;background:var(--bg);z-index:10;padding:calc(12px + env(safe-area-inset-top,0px)) 12px 12px;overflow:auto;display:none;flex-direction:column;gap:10px}
 #set.open{display:flex}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px}
@@ -53,14 +58,16 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--acc);outline-of
 <body>
 <header><button id="conn">Connecter</button><span id="st">Non connecté</span><button id="gear" aria-label="Réglages">⚙ Réglages</button></header>
 <div id="msg"></div>
-<div id="dash"><div class="g" id="gs"></div><div class="g" id="gp"></div><div class="g" id="gc"></div><div class="g" id="gv"></div></div>
+<nav id="tabs"><button id="t1" class="act">Pilotage</button><button id="t2">Infos</button></nav>
+<div id="pv"><div id="dash"><div class="g" id="gs"></div><div class="g" id="gp"></div><div class="g" id="gc"></div><div class="g" id="gv"></div></div>
 <div id="ctl">
   <div id="info"><span>Courant envoyé</span><span id="amp">0.0 A</span><span>Garde le doigt sur le joystick : haut = accélérer, bas = freiner.</span></div>
   <div id="col">
     <div id="track" role="slider" aria-label="Accélération et freinage"><div class="lbl" id="up">Accélérer</div><div id="mid"></div><div class="lbl" id="dn">Freiner</div><div id="thumb">0</div></div>
     <button id="arm" aria-pressed="false">Armer</button>
   </div>
-</div>
+</div></div>
+<div id="inf" class="hide"><div id="rows"></div><button id="rst">Batterie rechargée (remise à zéro)</button><button id="emp">Batterie vide : enregistrer la capacité</button></div>
 <div id="set">
   <button id="close">← Retour</button>
   <div class="card"><h3>Courant</h3>
@@ -71,7 +78,9 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--acc);outline-of
     <label>Paires de pôles du moteur</label><input id="pp" type="number" min="1" value="7">
     <label>Réduction (1 = direct)</label><input id="gr" type="number" step="0.01" min="0.1" value="1">
     <label>Diamètre de roue (mm)</label><input id="wd" type="number" min="1" value="90">
-    <label>Cellules en série (S)</label><input id="cs" type="number" min="3" max="24" value="8"></div>
+    <label>Cellules en série (S)</label><input id="cs" type="number" min="3" max="24" value="8">
+    <label>Capacité nominale de la batterie (mAh)</label><input id="cap" type="number" min="100" step="100" value="10000"></div>
+  <div class="card"><h3>Détection de recharge</h3><label>Tension minimale à la connexion (V)</label><input id="chv" type="number" step="0.1" value="32.2"><label>Hausse minimale vs dernière tension (V)</label><input id="chd" type="number" step="0.1" value="1.5"></div>
   <div class="card"><h3>Connexion</h3>
     <label>ID CAN du 2e VESC (vide si un seul)</label><input id="can" type="number" min="0" max="253" inputmode="numeric">
     <label><input id="all" type="checkbox"> Afficher tous les appareils Bluetooth</label></div>
@@ -86,17 +95,17 @@ function log(m){$("msg").textContent=m}
 const C=2*Math.PI*40,L=C*.75,GS={};
 function mk(id,o){const el=$(id);
  el.innerHTML=`<svg viewBox="0 0 100 100"><circle class="tk" cx="50" cy="50" r="40" transform="rotate(135 50 50)" stroke-dasharray="${L} ${C}"/><circle class="vl" cx="50" cy="50" r="40" transform="rotate(135 50 50)" stroke="${o.col}" stroke-dasharray="0 ${C}"/><text class="lb" x="50" y="32">${o.label}</text><text class="n" x="50" y="56">--</text><text class="u" x="50" y="69">${o.unit}</text></svg>`;
- GS[id]=Object.assign({vl:el.querySelector(".vl"),n:el.querySelector(".n")},o)}
+ GS[id]=Object.assign({vl:el.querySelector(".vl"),n:el.querySelector(".n"),lb:el.querySelector(".lb")},o)}
 function setG(id,v){const g=GS[id],f=clamp((v-g.min)/(g.max-g.min),0,1),z=clamp(-g.min/(g.max-g.min),0,1);
  g.vl.setAttribute("stroke-dasharray",Math.abs(f-z)*L+" "+C);g.vl.setAttribute("stroke-dashoffset",-Math.min(f,z)*L);g.n.textContent=v.toFixed(g.d)}
 function resetG(){for(const id in GS){GS[id].vl.setAttribute("stroke-dasharray","0 "+C);GS[id].n.textContent="--"}}
 mk("gs",{min:0,max:45,unit:"km/h",label:"VITESSE",col:"#4cc9f0",d:1});
 mk("gp",{min:-1000,max:3000,unit:"W",label:"PUISSANCE",col:"#ff8a4c",d:0});
-mk("gc",{min:-85,max:85,unit:"A",label:"COURANT",col:"#ffd43b",d:1});
-mk("gv",{min:24,max:33.6,unit:"V",label:"BATTERIE",col:"#51cf66",d:1});
+mk("gc",{min:-85,max:85,unit:"A",label:"COURANT MOTEUR",col:"#ffd43b",d:1});
+mk("gv",{min:0,max:100,unit:"%",label:"BATTERIE",col:"#51cf66",d:0});
 
 /* --- réglages mémorisés --- */
-const IDS=["mA","mB","mR","can","pp","gr","wd","cs"];
+const IDS=["mA","mB","mR","can","pp","gr","wd","cs","cap","chv","chd"];
 function sync(){$("vA").textContent=$("mA").value;$("vB").textContent=$("mB").value;$("vR").textContent=$("mR").value}
 try{const sv=JSON.parse(localStorage.getItem("vj")||"{}");IDS.forEach(i=>{if(sv[i]!==undefined)$(i).value=sv[i]})}catch(e){}
 sync();
@@ -122,11 +131,40 @@ function onData(ev){const dv=ev.target.value;
   const pl=Uint8Array.from(rx.slice(hl,hl+len));
   const ok=rx[tot-1]===3&&((rx[hl+len]<<8)|rx[hl+len+1])===crc16(pl);
   rx.splice(0,ok?tot:1);if(ok&&pl[0]===4)values(pl)}}
-function values(pl){if(pl.length<29)return;
- const d=new DataView(pl.buffer,pl.byteOffset+1),cm=d.getInt32(4)/100,cin=d.getInt32(8)/100,rpm=d.getInt32(22),vin=d.getInt16(26)/10,S=+$("cs").value||8;
- GS.gv.min=3*S;GS.gv.max=4.2*S;
- setG("gs",Math.abs(rpm)/(+$("pp").value||1)/(+$("gr").value||1)*Math.PI*(+$("wd").value||0)*60/1e6);
- setG("gp",vin*cin);setG("gc",cm);setG("gv",vin)}
+const ST=(()=>{try{return JSON.parse(localStorage.getItem("vjs")||"{}")}catch(e){return{}}})();
+ST.used=ST.used||0;ST.km=ST.km||0;ST.wh=ST.wh||0;ST.caps=ST.caps||[];ST.vmin=ST.vmin||99;
+let vs=0,smax=0,lastSave=0,first=true;
+const saveST=()=>{try{localStorage.setItem("vjs",JSON.stringify(ST))}catch(e){}};
+const capAh=()=>{const c=ST.caps.slice(-5);return(c.length?c.reduce((a,b)=>a+b,0)/c.length:(+$("cap").value||10000))};
+const ROWS=[["pct","Batterie (%)"],["lv","Dernière tension lue (V)"],["rech","Dernière recharge détectée"],["used","Capacité utilisée (mAh)"],["cap","Capacité estimée (mAh)"],["wh","Énergie utilisée (Wh)"],["km","Distance depuis recharge (km)"],["whkm","Consommation (Wh/km)"],["rng","Autonomie restante (km)"]];
+$("rows").innerHTML=ROWS.map(r=>`<div class="row"><span>${r[1]}</span><b id="i_${r[0]}">--</b></div>`).join("");
+const si=(k,t)=>{$("i_"+k).textContent=t};
+function values(pl){if(pl.length<54)return;
+ const d=new DataView(pl.buffer,pl.byteOffset+1),S=+$("cs").value||8;
+ const v={tf:d.getInt16(0)/10,tm:d.getInt16(2)/10,cm:d.getInt32(4)/100,ci:d.getInt32(8)/100,duty:d.getInt16(20)/10,rpm:d.getInt32(22),vin:d.getInt16(26)/10,ah:d.getInt32(28)/1e4,ahc:d.getInt32(32)/1e4,wh:d.getInt32(36)/1e4,whc:d.getInt32(40)/1e4,tab:d.getInt32(48),fault:d.getUint8(52)};
+ if(first){first=false;if(ST.lastV&&v.vin>(+$("chv").value||32.2)&&v.vin-ST.lastV>(+$("chd").value||1.5)){recharged();log("Recharge détectée ("+ST.lastV.toFixed(1)+" V → "+v.vin.toFixed(1)+" V) : compteurs remis à zéro.")}}
+ const k=1/((+$("pp").value||1)*(+$("gr").value||1)),wm=Math.PI*(+$("wd").value||0)/1000;
+ const spd=Math.abs(v.rpm)*k*wm*60/1000;smax=Math.max(smax,spd);
+ let p=ST.raw||v;if(v.ah<p.ah||v.ahc<p.ahc||v.tab<p.tab)p={ah:0,ahc:0,wh:0,whc:0,tab:0};
+ ST.used+=(v.ah-p.ah)-(v.ahc-p.ahc);ST.wh+=(v.wh-p.wh)-(v.whc-p.whc);ST.km+=(v.tab-p.tab)/6*k*wm/1000;
+ ST.raw={ah:v.ah,ahc:v.ahc,wh:v.wh,whc:v.whc,tab:v.tab};
+ vs=vs?vs*.98+v.vin*.02:v.vin;ST.vmin=Math.min(ST.vmin,vs);
+ if(Date.now()-lastSave>5000){saveST();lastSave=Date.now()}
+ const c=capAh(),usedm=ST.used*1000,pct=clamp(100*(1-usedm/c),0,100),pw=v.vin*v.ci;
+ setG("gs",spd);setG("gp",pw);setG("gc",v.cm);setG("gv",pct);GS.gv.lb.textContent="BATT "+v.vin.toFixed(1)+" V";
+ ST.lastV=v.vin;renderInfo()}
+function recharged(){if(ST.used>.5&&ST.vmin<=3.4*(+$("cs").value||8)){ST.caps.push(Math.round(ST.used*1000));ST.caps=ST.caps.slice(-10)}
+ ST.used=0;ST.km=0;ST.wh=0;ST.vmin=99;ST.rech=Date.now();saveST();renderInfo()}
+function renderInfo(){const c=capAh(),um=ST.used*1000,rate=ST.km>.3&&ST.used>.02?ST.used/ST.km:0;
+ si("pct",clamp(100*(1-um/c),0,100).toFixed(0));si("lv",ST.lastV?ST.lastV.toFixed(1):"--");
+ si("rech",ST.rech?new Date(ST.rech).toLocaleString("fr-CH",{dateStyle:"short",timeStyle:"short"}):"--");
+ si("used",Math.round(um));si("cap",Math.round(c)+" ("+ST.caps.length+" mes.)");si("wh",ST.wh.toFixed(1));si("km",ST.km.toFixed(2));
+ si("whkm",ST.km>.3?(ST.wh/ST.km).toFixed(1):"--");si("rng",rate?Math.max(0,(c/1000-ST.used)/rate).toFixed(1):"--")}
+$("rst").onclick=()=>{if(!confirm("Batterie rechargée ? Les compteurs depuis recharge repartent de zéro."))return;recharged();log("Compteurs remis à zéro.")};
+$("emp").onclick=()=>{if(ST.used<.2){log("Pas assez de consommation enregistrée.");return}ST.caps.push(Math.round(ST.used*1000));ST.caps=ST.caps.slice(-10);saveST();renderInfo();log("Capacité enregistrée : "+Math.round(ST.used*1000)+" mAh")};
+function tab(n){setArmed(false);if(n===2)renderInfo();$("pv").classList.toggle("hide",n!==1);$("inf").classList.toggle("hide",n!==2);$("t1").classList.toggle("act",n===1);$("t2").classList.toggle("act",n===2)}
+$("t1").onclick=()=>tab(1);$("t2").onclick=()=>tab(2);
+renderInfo();
 
 /* --- boucle d'envoi 20 Hz --- */
 async function tick(){if(ticking||!chr)return;ticking=true;
@@ -151,7 +189,7 @@ $("arm").onclick=()=>setArmed(!armed);
 document.addEventListener("visibilitychange",()=>{if(document.hidden)setArmed(false)});
 
 /* --- connexion --- */
-function stopLoop(){clearInterval(timer);timer=null;chr=null;rx=[];setArmed(false);resetG();$("st").textContent="Non connecté";$("st").className="";$("conn").textContent="Connecter"}
+function stopLoop(){clearInterval(timer);timer=null;chr=null;rx=[];saveST();vs=0;first=true;setArmed(false);resetG();$("st").textContent="Non connecté";$("st").className="";$("conn").textContent="Connecter"}
 $("conn").onclick=async()=>{
  if(dev&&dev.gatt.connected){dev.gatt.disconnect();return}
  if(!navigator.bluetooth){log("Web Bluetooth indisponible : utilise Chrome sur Android, en HTTPS.");return}
